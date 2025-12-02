@@ -1,4 +1,4 @@
-import { pipeline, env, RawImage } from '@huggingface/transformers';
+import { pipeline, env, RawImage, AutoModel, AutoProcessor } from '@huggingface/transformers';
 
 // Configure transformers.js
 env.allowLocalModels = false;
@@ -10,14 +10,19 @@ let embedder: any = null;
 export const initFaceDetector = async () => {
   if (!detector) {
     try {
-      detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
+      // Use YOLOv9 - much faster and more accurate than DETR
+      const model = await AutoModel.from_pretrained('Xenova/yolov9-c', {
         device: 'webgpu',
       });
+      const processor = await AutoProcessor.from_pretrained('Xenova/yolov9-c');
+      detector = { model, processor };
     } catch (error) {
-      console.warn('WebGPU not available, falling back to CPU:', error);
-      detector = await pipeline('object-detection', 'Xenova/detr-resnet-50', {
+      console.warn('WebGPU not available for detector, falling back to CPU:', error);
+      const model = await AutoModel.from_pretrained('Xenova/yolov9-c', {
         device: 'cpu',
       });
+      const processor = await AutoProcessor.from_pretrained('Xenova/yolov9-c');
+      detector = { model, processor };
     }
   }
   return detector;
@@ -61,87 +66,131 @@ export interface DetectedFace {
   id: string;
   imageUrl: string;
   bbox: { x: number; y: number; width: number; height: number };
-  embedding?: number[]; // Face embedding for similarity matching
+  embedding?: number[];
+  confidence: number; // Detection confidence score
+  quality: 'high' | 'medium' | 'low'; // Face quality rating
 }
+
+// Calculate face quality based on size, blur, and lighting
+const assessFaceQuality = (canvas: HTMLCanvasElement): 'high' | 'medium' | 'low' => {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 'low';
+  
+  const { width, height } = canvas;
+  const faceSize = width * height;
+  
+  // Quality based on face size (larger is better for recognition)
+  if (faceSize < 1600) return 'low'; // < 40x40px
+  if (faceSize < 6400) return 'medium'; // < 80x80px
+  return 'high'; // >= 80x80px
+};
 
 export const detectFacesInImage = async (imageUrl: string): Promise<DetectedFace[]> => {
   try {
-    const detector = await initFaceDetector();
+    const { model, processor } = await initFaceDetector();
     const embedder = await initFaceEmbedder();
     
     return new Promise((resolve) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = async () => {
-      try {
-        const results = await detector(img);
-        
-        // Filter for person detections (which includes faces)
-        let detections = results.filter((r: any) => r.label === 'person' && r.score > 0.3);
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = async () => {
+        try {
+          // Process image with YOLOv9
+          const image = await RawImage.read(imageUrl);
+          const { pixel_values } = await processor(image);
+          const { outputs } = await model({ images: pixel_values });
+          const predictions = outputs.tolist();
+          
+          // Filter for person detections with higher confidence threshold
+          let detections = predictions
+            .filter((pred: any) => {
+              const [xmin, ymin, xmax, ymax, score, classId] = pred;
+              // Class 0 is 'person' in YOLO models
+              return classId === 0 && score > 0.5;
+            })
+            .map((pred: any) => {
+              const [xmin, ymin, xmax, ymax, score] = pred;
+              return {
+                box: { xmin, ymin, xmax, ymax },
+                score
+              };
+            });
 
-        // Fallback: if nothing detected, treat the whole image as one face so the flow still works
-        if (!detections.length) {
-          detections = [{
-            box: {
-              xmin: 0,
-              ymin: 0,
-              xmax: img.width,
-              ymax: img.height,
-            },
-          }];
+          // Fallback: if no person detected, treat whole image as one face
+          if (!detections.length) {
+            detections = [{
+              box: {
+                xmin: 0,
+                ymin: 0,
+                xmax: img.width,
+                ymax: img.height,
+              },
+              score: 0.5,
+            }];
+          }
+          
+          const faces = await Promise.all(
+            detections.map(async (result: any, index: number) => {
+              const { box, score } = result;
+              
+              // Create a canvas to extract the face region
+              const canvas = document.createElement('canvas');
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return null;
+              
+              const padding = 20;
+              const x = Math.max(0, box.xmin - padding);
+              const y = Math.max(0, box.ymin - padding);
+              const width = Math.min(img.width - x, (box.xmax ?? img.width) - (box.xmin ?? 0) + padding * 2);
+              const height = Math.min(img.height - y, (box.ymax ?? img.height) - (box.ymin ?? 0) + padding * 2);
+              
+              canvas.width = width;
+              canvas.height = height;
+              ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+              
+              // Assess face quality
+              const quality = assessFaceQuality(canvas);
+              
+              try {
+                // Generate face embedding for accurate matching
+                const faceImageUrl = canvas.toDataURL('image/jpeg', 0.8);
+                const rawImage = await RawImage.fromURL(faceImageUrl);
+                const embeddingResult = await embedder(rawImage);
+                
+                // Extract embedding array
+                const embedding = Array.from(embeddingResult.data);
+                
+                return {
+                  id: `${imageUrl}-${index}`,
+                  imageUrl: faceImageUrl,
+                  bbox: { x, y, width, height },
+                  embedding,
+                  confidence: score,
+                  quality,
+                };
+              } catch (error) {
+                console.error('Error generating embedding:', error);
+                return {
+                  id: `${imageUrl}-${index}`,
+                  imageUrl: canvas.toDataURL('image/jpeg', 0.8),
+                  bbox: { x, y, width, height },
+                  confidence: score,
+                  quality,
+                };
+              }
+            })
+          );
+          
+          // Filter out low-quality faces if we have enough high/medium quality ones
+          const qualityFaces = faces.filter(Boolean) as DetectedFace[];
+          const highMediumFaces = qualityFaces.filter(f => f.quality !== 'low');
+          
+          resolve(highMediumFaces.length >= 2 ? highMediumFaces : qualityFaces);
+        } catch (error) {
+          console.error('Error detecting faces:', error);
+          resolve([]);
         }
-        
-        const faces = await Promise.all(
-          detections.map(async (result: any, index: number) => {
-            const { box } = result;
-            
-            // Create a canvas to extract the face region
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) return null;
-            
-            const padding = 20;
-            const x = Math.max(0, box.xmin - padding);
-            const y = Math.max(0, box.ymin - padding);
-            const width = Math.min(img.width - x, (box.xmax ?? img.width) - (box.xmin ?? 0) + padding * 2);
-            const height = Math.min(img.height - y, (box.ymax ?? img.height) - (box.ymin ?? 0) + padding * 2);
-            
-            canvas.width = width;
-            canvas.height = height;
-            ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
-            
-            try {
-              // Generate face embedding for accurate matching
-              const faceImageUrl = canvas.toDataURL('image/jpeg', 0.8);
-              const rawImage = await RawImage.fromURL(faceImageUrl);
-              const embeddingResult = await embedder(rawImage);
-              
-              // Extract embedding array
-              const embedding = Array.from(embeddingResult.data);
-              
-              return {
-                id: `${imageUrl}-${index}`,
-                imageUrl: faceImageUrl,
-                bbox: { x, y, width, height },
-                embedding,
-              };
-            } catch (error) {
-              console.error('Error generating embedding:', error);
-              return {
-                id: `${imageUrl}-${index}`,
-                imageUrl: canvas.toDataURL('image/jpeg', 0.8),
-                bbox: { x, y, width, height },
-              };
-            }
-          })
-        );
-        
-        resolve(faces.filter(Boolean) as DetectedFace[]);
-      } catch (error) {
-        console.error('Error detecting faces:', error);
-        resolve([]);
-      }
-    };
+      };
       img.onerror = () => resolve([]);
       img.src = imageUrl;
     });

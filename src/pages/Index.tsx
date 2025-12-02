@@ -168,9 +168,9 @@ const Index = () => {
       const uniqueFaces = allFaces.filter((face, index, self) => 
         index === self.findIndex((f) => {
           if (face.embedding && f.embedding) {
-            // Use cosine similarity for deduplication
+            // Use cosine similarity for deduplication with stricter threshold
             const similarity = cosineSimilarity(face.embedding, f.embedding);
-            return similarity > 0.8; // Higher threshold for deduplication
+            return similarity > 0.85; // Higher threshold = more strict deduplication
           } else {
             // Fallback to bbox comparison
             const isSimilar = 
@@ -182,12 +182,20 @@ const Index = () => {
         })
       );
 
-      setFaces(uniqueFaces);
+      // Sort by quality and confidence
+      const sortedFaces = uniqueFaces.sort((a, b) => {
+        const qualityScore = { high: 3, medium: 2, low: 1 };
+        const aScore = qualityScore[a.quality] * 100 + a.confidence;
+        const bScore = qualityScore[b.quality] * 100 + b.confidence;
+        return bScore - aScore;
+      });
+
+      setFaces(sortedFaces);
       setStep("select");
       
       toast({
         title: "Faces detected!",
-        description: `Found ${uniqueFaces.length} unique face${uniqueFaces.length !== 1 ? 's' : ''}`,
+        description: `Found ${sortedFaces.length} unique face${sortedFaces.length !== 1 ? 's' : ''}`,
       });
     } catch (error) {
       console.error(error);
@@ -237,8 +245,12 @@ const Index = () => {
           if (selectedFace.embedding && face.embedding) {
             // Use cosine similarity for accurate face matching
             const similarity = cosineSimilarity(selectedFace.embedding, face.embedding);
-            // Threshold of 0.6 works well for face matching
-            return similarity > 0.6;
+            // Lower threshold (0.55) for matching to catch more variations
+            // But weight by quality and confidence
+            const qualityBoost = face.quality === 'high' ? 0.05 : face.quality === 'medium' ? 0.02 : 0;
+            const confidenceBoost = face.confidence > 0.7 ? 0.03 : 0;
+            const adjustedThreshold = 0.55 - qualityBoost - confidenceBoost;
+            return similarity > adjustedThreshold;
           } else {
             // Fallback to bounding box comparison
             return (
