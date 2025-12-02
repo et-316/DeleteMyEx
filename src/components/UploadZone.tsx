@@ -1,7 +1,6 @@
-import { Camera as CameraIcon, ImagePlus } from "lucide-react";
+import { ImagePlus } from "lucide-react";
 import { useCallback } from "react";
 import { Camera } from "@capacitor/camera";
-import { CameraResultType, CameraSource } from "@capacitor/camera";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 
@@ -60,65 +59,28 @@ export const UploadZone = ({ onFilesSelected }: UploadZoneProps) => {
     }
   }, [onFilesSelected, toast]);
 
-  const handleNativeCamera = useCallback(async () => {
-    try {
-      const photo = await Camera.getPhoto({
-        quality: 90,
-        allowEditing: false,
-        resultType: CameraResultType.Uri,
-        source: CameraSource.Camera,
-      });
-
-      if (!photo.webPath) {
-        return;
-      }
-
-      // Convert photo to File object
-      const response = await fetch(photo.webPath);
-      const blob = await response.blob();
-      const file = new File([blob], "camera-photo.jpg", { type: "image/jpeg" });
-
-      onFilesSelected([{ file }]);
-    } catch (error) {
-      console.error("Error taking photo:", error);
-      toast({
-        title: "Error",
-        description: "Failed to access camera. Please check permissions.",
-        variant: "destructive",
-      });
-    }
-  }, [onFilesSelected, toast]);
-
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6 animate-fade-in">
-      <div className="flex flex-col items-center justify-center w-full p-8 rounded-3xl bg-gradient-to-br from-primary/5 to-secondary/5 border-2 border-primary/20">
+      <div className="flex flex-col items-center justify-center w-full p-12 rounded-3xl bg-gradient-to-br from-primary/5 to-secondary/5 border-2 border-primary/20">
         <div className="text-center mb-8">
           <h2 className="text-2xl font-bold mb-2">Choose Photos</h2>
           <p className="text-muted-foreground">
-            Select photos from your library or take new ones
+            Select photos from your library to get started
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
-          <Button
-            onClick={handleNativePhotoPicker}
-            size="lg"
-            className="flex-1 h-32 flex-col gap-3 bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-glow"
-          >
-            <ImagePlus className="w-10 h-10" />
-            <span className="text-lg font-semibold">Photo Library</span>
-          </Button>
-
-          <Button
-            onClick={handleNativeCamera}
-            size="lg"
-            variant="outline"
-            className="flex-1 h-32 flex-col gap-3 border-primary/40 hover:bg-primary/5"
-          >
-            <CameraIcon className="w-10 h-10" />
-            <span className="text-lg font-semibold">Take Photo</span>
-          </Button>
-        </div>
+        <Button
+          onClick={handleNativePhotoPicker}
+          size="lg"
+          className="h-32 px-12 flex-col gap-3 bg-gradient-primary hover:opacity-90 text-primary-foreground shadow-glow"
+        >
+          <ImagePlus className="w-12 h-12" />
+          <span className="text-xl font-semibold">Select from Photo Library</span>
+        </Button>
+        
+        <p className="text-xs text-muted-foreground mt-6 text-center max-w-sm">
+          Includes photos from all albums, including Hidden
+        </p>
       </div>
     </div>
   );

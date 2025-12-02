@@ -27,7 +27,11 @@ public class DeleteMyExPlugin: CAPPlugin {
     }
     
     private func performDeletion(identifiers: [String], call: CAPPluginCall) {
-        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        // Fetch options that include hidden assets
+        let fetchOptions = PHFetchOptions()
+        fetchOptions.includeHiddenAssets = true
+        
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: fetchOptions)
         
         if fetchResult.count == 0 {
             call.reject("No photos found with provided identifiers")
