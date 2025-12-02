@@ -109,12 +109,20 @@ const Index = () => {
       );
 
       setFaces(uniqueFaces);
-      setStep("select");
-      
-      toast({
-        title: "Scan Complete!",
-        description: `Found ${uniqueFaces.length} unique face${uniqueFaces.length !== 1 ? 's' : ''} in ${libraryPhotos.length} photos`,
-      });
+
+      if (uniqueFaces.length === 0) {
+        setStep("upload");
+        toast({
+          title: "No faces detected",
+          description: "Try selecting photos where faces are clearly visible.",
+        });
+      } else {
+        setStep("select");
+        toast({
+          title: "Scan Complete!",
+          description: `Found ${uniqueFaces.length} unique face${uniqueFaces.length !== 1 ? 's' : ''} in ${libraryPhotos.length} photos`,
+        });
+      }
     } catch (error) {
       console.error(error);
       toast({
@@ -191,12 +199,20 @@ const Index = () => {
       });
 
       setFaces(sortedFaces);
-      setStep("select");
-      
-      toast({
-        title: "Faces detected!",
-        description: `Found ${sortedFaces.length} unique face${sortedFaces.length !== 1 ? 's' : ''}`,
-      });
+
+      if (sortedFaces.length === 0) {
+        setStep("upload");
+        toast({
+          title: "No faces detected",
+          description: "Try choosing photos where faces are clearly visible.",
+        });
+      } else {
+        setStep("select");
+        toast({
+          title: "Faces detected!",
+          description: `Found ${sortedFaces.length} unique face${sortedFaces.length !== 1 ? 's' : ''}`,
+        });
+      }
     } catch (error) {
       console.error(error);
       toast({
