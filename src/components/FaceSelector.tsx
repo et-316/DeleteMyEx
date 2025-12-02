@@ -6,6 +6,8 @@ interface Face {
   id: string;
   imageUrl: string;
   bbox: { x: number; y: number; width: number; height: number };
+  confidence: number;
+  quality: 'high' | 'medium' | 'low';
 }
 
 interface FaceSelectorProps {
@@ -52,6 +54,17 @@ export const FaceSelector = ({ faces, onSelectEx }: FaceSelectorProps) => {
               alt="Detected face"
               className="w-full h-full object-cover"
             />
+            {/* Quality & Confidence Badge */}
+            <div className="absolute top-2 right-2 flex gap-1">
+              {face.quality === 'high' && (
+                <span className="px-2 py-1 bg-green-500/90 text-white text-xs font-semibold rounded">
+                  High Quality
+                </span>
+              )}
+              <span className="px-2 py-1 bg-black/70 text-white text-xs font-semibold rounded">
+                {Math.round(face.confidence * 100)}%
+              </span>
+            </div>
             {selectedFace === face.id && (
               <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
                 <CheckCircle2 className="w-12 h-12 text-primary-foreground drop-shadow-lg" />
